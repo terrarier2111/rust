@@ -115,7 +115,14 @@ pub(super) fn check_fn<'a, 'tcx>(
 
     fn_maybe_err(tcx, span, fn_sig.abi);
 
+    if tcx.sess.verbose() {
+        println!("after maybe err!");
+    }
+
     if fn_sig.abi == Abi::RustCall {
+        if tcx.sess.verbose() {
+            println!("RUST ABI CALL!");
+        }
         let expected_args = if let ImplicitSelfKind::None = decl.implicit_self { 1 } else { 2 };
 
         let err = || {
@@ -139,15 +146,25 @@ pub(super) fn check_fn<'a, 'tcx>(
         };
 
         if fn_sig.inputs().len() != expected_args {
+            if tcx.sess.verbose() {
+                println!("no_err!?");
+            }
             err()
         } else {
             // FIXME(CraftSpider) Add a check on parameter expansion, so we don't just make the ICE happen later on
             //   This will probably require wide-scale changes to support a TupleKind obligation
             //   We can't resolve this without knowing the type of the param
+            if tcx.sess.verbose() {
+                println!("error! (maybe)");
+            }
             if !matches!(fn_sig.inputs()[expected_args - 1].kind(), ty::Tuple(_) | ty::Param(_)) {
                 err()
             }
         }
+    }
+
+    if tcx.sess.verbose() {
+        println!("checking generators...");
     }
 
     if body.generator_kind.is_some() && can_be_generator.is_some() {
@@ -161,7 +178,19 @@ pub(super) fn check_fn<'a, 'tcx>(
         fcx.resume_yield_tys = Some((resume_ty, yield_ty));
     }
 
+    // FIXME: We only get to this point once if the input has *the* corrupted form
+    if tcx.sess.verbose() {
+        println!("gathering locals..."); // FIXME: ~TERRA: Between this and the next debug, the declare assignment should have been made!
+    }
+    unsafe {
+        rustc_hir::intravisit::VERBOSE = tcx.sess.verbose();
+    }
+
     GatherLocalsVisitor::new(&fcx).visit_body(body);
+
+    if tcx.sess.verbose() {
+        println!("doing lists...");
+    }
 
     // C-variadic fns also have a `VaList` input that's not listed in `fn_sig`
     // (as it's created inside the body itself, not passed in from outside).
@@ -174,6 +203,10 @@ pub(super) fn check_fn<'a, 'tcx>(
     } else {
         None
     };
+
+    if tcx.sess.verbose() {
+        println!("checking inputs...");
+    }
 
     // Add formal parameters.
     let inputs_hir = hir.fn_decl_by_hir_id(fn_id).map(|decl| &decl.inputs);

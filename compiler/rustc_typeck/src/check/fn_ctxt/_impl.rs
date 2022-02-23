@@ -89,17 +89,29 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         mut ty: Ty<'tcx>,
         mutate_fulfillment_errors: impl Fn(&mut Vec<traits::FulfillmentError<'tcx>>),
     ) -> Ty<'tcx> {
+        if self.tcx.sess.verbose() {
+            println!("coerce dbg 1");
+        }
         // No Infer()? Nothing needs doing.
         if !ty.has_infer_types_or_consts() {
             debug!("no inference var, nothing needs doing");
             return ty;
         }
+        if self.tcx.sess.verbose() {
+            println!("coerce dbg 2");
+        }
 
         // If `ty` is a type variable, see whether we already know what it is.
         ty = self.resolve_vars_if_possible(ty);
+        if self.tcx.sess.verbose() {
+            println!("coerce dbg 3");
+        }
         if !ty.has_infer_types_or_consts() {
             debug!(?ty);
             return ty;
+        }
+        if self.tcx.sess.verbose() {
+            println!("coerce dbg 4");
         }
 
         // If not, try resolving pending obligations as much as
@@ -107,7 +119,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // indirect dependencies that don't seem worth tracking
         // precisely.
         self.select_obligations_where_possible(false, mutate_fulfillment_errors);
+        if self.tcx.sess.verbose() {
+            println!("coerce dbg 5");
+        }
         ty = self.resolve_vars_if_possible(ty);
+        if self.tcx.sess.verbose() {
+            println!("coerce dbg 6");
+        }
 
         debug!(?ty);
         ty
@@ -135,6 +153,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     }
 
     pub fn local_ty(&self, span: Span, nid: hir::HirId) -> LocalTy<'tcx> {
+        if self.tcx.sess.verbose() {
+            println!("looking up local_ty: {} in span {:?} stred {}", nid, span, self.tcx.hir().node_to_string(nid));
+        }
         self.locals.borrow().get(&nid).cloned().unwrap_or_else(|| {
             span_bug!(span, "no type for local variable {}", self.tcx.hir().node_to_string(nid))
         })

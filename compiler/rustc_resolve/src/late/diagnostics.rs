@@ -134,6 +134,7 @@ impl<'a: 'ast, 'ast> LateResolutionVisitor<'a, '_, 'ast> {
         source: PathSource<'_>,
         res: Option<Res>,
     ) -> (DiagnosticBuilder<'a>, Vec<ImportSuggestion>) {
+        println!("errored and giving diagnostics!");
         let ident_span = path.last().map_or(span, |ident| ident.ident.span);
         let ns = source.namespace();
         let is_expected = &|res| source.is_expected(res);

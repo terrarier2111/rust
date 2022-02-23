@@ -44,3 +44,5 @@ PRINT-ATTR INPUT (DEBUG): TokenStream [
         span: $DIR/keep-expr-tokens.rs:23:5: 23:14 (#0),
     },
 ]
+errored and giving diagnostics!
+errored and giving diagnostics!

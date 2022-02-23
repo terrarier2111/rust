@@ -399,7 +399,14 @@ fn typeck_with_fallback<'tcx>(
             );
             wf_tys.extend(fn_sig.inputs_and_output.iter());
 
-            let fcx = check_fn(&inh, param_env, fn_sig, decl, id, body, None, true).0;
+            if tcx.sess.verbose() {
+                println!("checking fn..."); // FIXME: ~TERRA: It fails to insert the local between this and the next message ("CHECKED fn!")!
+            }
+            // FIXME: ~TERRA: This gets called before the local collection shit! (this is the entry point)
+            let fcx = check_fn(&inh, param_env, fn_sig, decl, id, body, None, true).0; // FIXME: ~TERRA: This is where it fails to insert the local!
+            if tcx.sess.verbose() {
+                println!("CHECKED fn!");
+            }
             (fcx, wf_tys)
         } else {
             let fcx = FnCtxt::new(&inh, param_env, body.value.hir_id);
@@ -440,6 +447,10 @@ fn typeck_with_fallback<'tcx>(
                     _ => fallback(),
                 });
 
+            if tcx.sess.verbose() {
+                println!("checking stuff!");
+            }
+
             let expected_type = fcx.normalize_associated_types_in(body.value.span, expected_type);
             fcx.require_type_is_sized(expected_type, body.value.span, traits::ConstSized);
 
@@ -452,6 +463,10 @@ fn typeck_with_fallback<'tcx>(
 
             (fcx, FxHashSet::default())
         };
+
+        if tcx.sess.verbose() {
+            println!("checking casts!");
+        }
 
         let fallback_has_occurred = fcx.type_inference_fallback();
 
@@ -466,6 +481,11 @@ fn typeck_with_fallback<'tcx>(
         assert!(fcx.deferred_call_resolutions.borrow().is_empty());
         fcx.resolve_generator_interiors(def_id.to_def_id());
 
+        if tcx.sess.verbose() {
+            println!("checking sized!");
+        }
+
+
         for (ty, span, code) in fcx.deferred_sized_obligations.borrow_mut().drain(..) {
             let ty = fcx.normalize_ty(span, ty);
             fcx.require_type_is_sized(ty, span, code);
@@ -473,12 +493,19 @@ fn typeck_with_fallback<'tcx>(
 
         fcx.select_all_obligations_or_error();
 
+        if tcx.sess.verbose() {
+            println!("checking dn_sig!");
+        }
+
         if fn_sig.is_some() {
             fcx.regionck_fn(id, body, span, wf_tys);
         } else {
             fcx.regionck_expr(body);
         }
 
+        if tcx.sess.verbose() {
+            println!("checking type_vars in body!");
+        }
         fcx.resolve_type_vars_in_body(body)
     });
 

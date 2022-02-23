@@ -135,7 +135,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_ty_expr: Option<&'tcx hir::Expr<'tcx>>,
         allow_two_phase: AllowTwoPhase,
     ) -> (Ty<'tcx>, Option<DiagnosticBuilder<'tcx>>) {
-        let expected = self.resolve_vars_with_obligations(expected);
+        let expected = self.resolve_vars_with_obligations(expected); // FIXME: ~TERRA: The local should be resolved in this line!
+        if self.tcx.sess.verbose() {
+            println!("coerced things!");
+        }
 
         let e = match self.try_coerce(expr, checked_ty, expected, allow_two_phase, None) {
             Ok(ty) => return (ty, None),

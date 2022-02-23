@@ -30,7 +30,7 @@ use rustc_errors::{pluralize, struct_span_err, Applicability, DiagnosticBuilder,
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, DefKind, Res};
 use rustc_hir::def_id::DefId;
-use rustc_hir::intravisit::Visitor;
+use rustc_hir::intravisit::{VERBOSE, Visitor};
 use rustc_hir::{ExprKind, HirId, QPath};
 use rustc_infer::infer;
 use rustc_infer::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
@@ -108,6 +108,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_ty_expr: Option<&'tcx hir::Expr<'tcx>>,
     ) -> Ty<'tcx> {
         let ty = self.check_expr_with_hint(expr, expected);
+        if self.tcx.sess.verbose() {
+            println!("demanding coercion...");
+        }
         // checks don't need two phase
         self.demand_coerce(expr, ty, expected, expected_ty_expr, AllowTwoPhase::No)
     }
@@ -176,6 +179,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected: Expectation<'tcx>,
         args: &'tcx [hir::Expr<'tcx>],
     ) -> Ty<'tcx> {
+        // FIXME: ~TERRA: Is the ACTUAL issue in here?
         if self.tcx().sess.verbose() {
             // make this code only run with -Zverbose because it is probably slow
             if let Ok(lint_str) = self.tcx.sess.source_map().span_to_snippet(expr.span) {
@@ -202,6 +206,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
             _ => false,
         };
+        if self.tcx().sess.verbose() {
+            println!("TRY BLOCK: {}", is_try_block_generated_unit_expr);
+        }
 
         // Warn for expressions after diverging siblings.
         if !is_try_block_generated_unit_expr {
@@ -240,6 +247,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // Any expression that produces a value of type `!` must have diverged
         if ty.is_never() {
             self.diverges.set(self.diverges.get() | Diverges::always(expr.span));
+        }
+
+        if self.tcx().sess.verbose() {
+            println!("ERR | TY: {} {}", ty, expr.hir_id);
         }
 
         // Record the type, which applies it effects.
@@ -1357,6 +1368,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         base_expr: &'tcx Option<&'tcx hir::Expr<'tcx>>,
         expr_span: Span,
     ) {
+        if self.tcx.sess.verbose() {
+            // panic!()
+        }
         let tcx = self.tcx;
 
         let adt_ty_hint = self
@@ -1386,6 +1400,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // Type-check each field.
         for field in ast_fields {
             let ident = tcx.adjust_ident(field.ident, variant.def_id);
+            if tcx.sess.verbose() {
+                println!("field: {:?} | {}", field, ident);
+            }
             let field_type = if let Some((i, v_field)) = remaining_fields.remove(&ident) {
                 seen_fields.insert(ident, field.span);
                 self.write_field_index(field.hir_id, i);
@@ -1399,6 +1416,12 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
                 self.field_ty(field.span, v_field, substs)
             } else {
+                /*
+                if let Some(base_expr) = base_expr {
+                    // self.check_field(field.expr, base_expr, field.ident);
+                    self.check_expr(field.expr);
+                }*/
+                // self.check_expr(field.expr);
                 error_happened = true;
                 if let Some(prev_span) = seen_fields.get(&ident) {
                     tcx.sess.emit_err(FieldMultiplySpecifiedInInitializer {
@@ -1417,7 +1440,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
             // Make sure to give a type to the field even if there's
             // an error, so we can continue type-checking.
-            self.check_expr_coercable_to_type(&field.expr, field_type, None);
+            // FIXME: ~TERRA: Is the ACTUAL issue in here?
+            if self.tcx.sess.verbose() {
+                println!("coercing types...");
+            }
+            self.check_expr_coercable_to_type(&field.expr, field_type, None); // FIXME: The declare assignment happens here if the input is correct!
         }
 
         // Make sure the programmer specified correct number of fields.
@@ -1436,14 +1463,77 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // If check_expr_struct_fields hit an error, do not attempt to populate
         // the fields with the base_expr. This could cause us to hit errors later
         // when certain fields are assumed to exist that in fact do not.
+        /*if error_happened { // FIXME: ~TERRA: Is it possible that this causes the issues with the missing type? | IMPORTANT: WITHOUT THIS, NOTHING PANICKS ANYMORE!
+            return;
+        }*/
+        if error_happened && unsafe { VERBOSE } {
+            println!("ERROR HAPPENED!");
+        } else if unsafe { VERBOSE } {
+            println!("NO ERROR HAPPENED! - BASE EXPR!");
+        }
         if error_happened {
+            /*
+            if let Some(base_expr) = base_expr {
+                if self.tcx.features().type_changing_struct_update { // FIXME: Fix this if this is enabled too!
+                    self.check_expr(base_expr);
+                } else {
+                    self.check_expr_has_type_or_error(base_expr, adt_ty, |_| {
+                        let base_ty = self.typeck_results.borrow().node_type(base_expr.hir_id);
+                        let same_adt = match (adt_ty.kind(), base_ty.kind()) {
+                            (ty::Adt(adt, _), ty::Adt(base_adt, _)) if adt == base_adt => true,
+                            _ => false,
+                        };
+                        if self.tcx.sess.is_nightly_build() && same_adt {
+                            feature_err(
+                                &self.tcx.sess.parse_sess,
+                                sym::type_changing_struct_update,
+                                base_expr.span,
+                                "type changing struct updating is experimental",
+                            )
+                                .emit();
+                        }
+                    });
+                }
+            }
+            */
+
+            /*
+            if let Some(base_expr) = base_expr {
+                if !self.tcx.features().type_changing_struct_update {
+                    self.check_expr_has_type_or_error(base_expr, adt_ty, |_| {
+                        let base_ty = self.typeck_results.borrow().node_type(base_expr.hir_id);
+                        let same_adt = match (adt_ty.kind(), base_ty.kind()) {
+                            (ty::Adt(adt, _), ty::Adt(base_adt, _)) if adt == base_adt => true,
+                            _ => false,
+                        };
+                        println!("TESTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT");
+                        if self.tcx.sess.is_nightly_build() && same_adt {
+                            feature_err(
+                                &self.tcx.sess.parse_sess,
+                                sym::type_changing_struct_update,
+                                base_expr.span,
+                                "type changing struct updating is experimental",
+                            )
+                                .emit();
+                        }
+                    });
+                }
+            }*/
+
             return;
         }
 
         if let Some(base_expr) = base_expr {
+            // FIXME: ~TERRA: The code goes here (when inserting the panicking input)
+            if error_happened && unsafe { VERBOSE } {
+                println!("ERROR HAPPENED! - BASE EXPR!");
+            }
             // FIXME: We are currently creating two branches here in order to maintain
             // consistency. But they should be merged as much as possible.
             let fru_tys = if self.tcx.features().type_changing_struct_update {
+                if error_happened && unsafe { VERBOSE } {
+                    println!("ERROR HAPPENED! - UPDATE STRUCT!");
+                }
                 let base_ty = self.check_expr(base_expr);
                 match adt_ty.kind() {
                     ty::Adt(adt, substs) if adt.is_struct() => {
@@ -1506,6 +1596,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     }
                 }
             } else {
+                if error_happened && unsafe { VERBOSE } {
+                    println!("ERROR HAPPENED! - NOT UPDATING STRUCT!");
+                }
                 self.check_expr_has_type_or_error(base_expr, adt_ty, |_| {
                     let base_ty = self.typeck_results.borrow().node_type(base_expr.hir_id);
                     let same_adt = match (adt_ty.kind(), base_ty.kind()) {
@@ -1538,8 +1631,17 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     }
                 }
             };
+            if error_happened { // FIXME: ~TERRA: This was inserted for debugging purposes!
+                if error_happened && unsafe { VERBOSE } {
+                    println!("ERROR HAPPENED! - REACHED END!");
+                }
+                return;
+            }
             self.typeck_results.borrow_mut().fru_field_types_mut().insert(expr_id, fru_tys);
         } else if kind_name != "union" && !remaining_fields.is_empty() {
+            if error_happened && unsafe { VERBOSE } {
+                println!("ERROR HAPPENED! - REPORTING STUFF!");
+            }
             let inaccessible_remaining_fields = remaining_fields.iter().any(|(_, (_, field))| {
                 !field.vis.is_accessible_from(tcx.parent_module(expr_id).to_def_id(), tcx)
             });
@@ -1661,7 +1763,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     self.tcx.sess,
                     field.ident.span,
                     E0559,
-                    "{} `{}::{}` has no field named `{}`",
+                    "{} `{}::{}` has no field named `{}`", // TODO: ~TERRA: check this diagnostic!
                     kind_name,
                     actual,
                     variant.name,
@@ -1671,7 +1773,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     self.tcx.sess,
                     field.ident.span,
                     E0560,
-                    "{} `{}` has no field named `{}`",
+                    "{} `{}` has no field named `{}`", // TODO: ~TERRA: check this diagnostic!
                     kind_name,
                     actual,
                     field.ident

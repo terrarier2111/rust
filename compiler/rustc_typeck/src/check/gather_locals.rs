@@ -53,6 +53,9 @@ impl<'a, 'tcx> GatherLocalsVisitor<'a, 'tcx> {
                     kind: TypeVariableOriginKind::TypeInference,
                     span,
                 });
+                if self.fcx.tcx.sess.verbose() {
+                    println!("assign 1 type: {:?} for {}", var_ty.kind(), nid);
+                }
                 self.fcx
                     .locals
                     .borrow_mut()
@@ -60,6 +63,9 @@ impl<'a, 'tcx> GatherLocalsVisitor<'a, 'tcx> {
                 var_ty
             }
             Some(typ) => {
+                if self.fcx.tcx.sess.verbose() {
+                    println!("assign 2 type: {:?}", typ);
+                }
                 // Take type that the user specified.
                 self.fcx.locals.borrow_mut().insert(nid, typ);
                 typ.revealed_ty
@@ -87,6 +93,10 @@ impl<'a, 'tcx> GatherLocalsVisitor<'a, 'tcx> {
             }
             None => None,
         };
+        if self.fcx.tcx.sess.verbose() {
+            println!("declare assignment! {:?}", local_ty);
+            // panic!("INTENDED!");
+        }
         self.assign(decl.span, decl.hir_id, local_ty);
 
         debug!(
@@ -118,6 +128,10 @@ impl<'a, 'tcx> Visitor<'tcx> for GatherLocalsVisitor<'a, 'tcx> {
     // Add pattern bindings.
     fn visit_pat(&mut self, p: &'tcx hir::Pat<'tcx>) {
         if let PatKind::Binding(_, _, ident, _) = p.kind {
+            if self.fcx.tcx.sess.verbose() {
+                // TODO: ~TERRA: This is the kind of assignment which happens before the ICE but it DOESN'T happen when we have a 'normal' input
+                println!("binding assignment! {:?}", ident);
+            }
             let var_ty = self.assign(p.span, p.hir_id, None);
 
             if let Some(ty_span) = self.outermost_fn_param_pat {

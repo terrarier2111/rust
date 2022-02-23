@@ -493,9 +493,20 @@ pub fn walk_mod<'v, V: Visitor<'v>>(visitor: &mut V, module: &'v Mod<'v>, mod_hi
     }
 }
 
+pub static mut VERBOSE: bool = false;
+
 pub fn walk_body<'v, V: Visitor<'v>>(visitor: &mut V, body: &'v Body<'v>) {
+    if unsafe { VERBOSE } {
+        println!("BEFORE BODY...");
+    }
     walk_list!(visitor, visit_param, body.params);
-    visitor.visit_expr(&body.value);
+    if unsafe { VERBOSE } {
+        println!("AFTER BODY!");
+    }
+    visitor.visit_expr(&body.value); // FIXME: ~TERRA: The issue is somewhere in this call! | 23.02.22
+    if unsafe { VERBOSE } {
+        println!("AFTER EXPR!");
+    }
 }
 
 pub fn walk_local<'v, V: Visitor<'v>>(visitor: &mut V, local: &'v Local<'v>) {
@@ -1084,14 +1095,23 @@ pub fn walk_field_def<'v, V: Visitor<'v>>(visitor: &mut V, field: &'v FieldDef<'
 
 pub fn walk_block<'v, V: Visitor<'v>>(visitor: &mut V, block: &'v Block<'v>) {
     visitor.visit_id(block.hir_id);
-    walk_list!(visitor, visit_stmt, block.stmts);
+    if unsafe { VERBOSE } {
+        println!("visited id!");
+    }
+    walk_list!(visitor, visit_stmt, block.stmts); // FIXME: The assignment should be in here!
+    if unsafe { VERBOSE } {
+        println!("visited stmt!");
+    }
     walk_list!(visitor, visit_expr, &block.expr);
 }
 
 pub fn walk_stmt<'v, V: Visitor<'v>>(visitor: &mut V, statement: &'v Stmt<'v>) {
     visitor.visit_id(statement.hir_id);
     match statement.kind {
-        StmtKind::Local(ref local) => visitor.visit_local(local),
+        StmtKind::Local(ref local) => {
+            // println!("statement: {:?}", statement);
+            visitor.visit_local(local)
+        },
         StmtKind::Item(item) => visitor.visit_nested_item(item),
         StmtKind::Expr(ref expression) | StmtKind::Semi(ref expression) => {
             visitor.visit_expr(expression)
@@ -1120,6 +1140,15 @@ pub fn walk_let_expr<'v, V: Visitor<'v>>(visitor: &mut V, let_expr: &'v Let<'v>)
 }
 
 pub fn walk_expr<'v, V: Visitor<'v>>(visitor: &mut V, expression: &'v Expr<'v>) {
+    // FIXME: In this function somewhere there is almost certainly the bug! | 23.02.22
+    /*
+    The following is the kind when we insert a working example!
+
+    kind: Block(Block { stmts: [Stmt { hir_id: HirId { owner: DefId(0:3 ~ closures[6543]::r), local_id: 14 }, kind: Local(Local { pat: Pat { hir_id: HirId { owner: DefId(0:3 ~ closures[6543]::r), local_id: 10 }, kind: Wild, span: closures.rs:15:8: 15:9 (#0), default_binding_modes: false }, ty: None, init: Some(Expr { hir_id: HirId { owner: DefId(0:3 ~ closures[6543]::r), local_id: 12 }, kind: Path(Resolved(None, Path { span: closures.rs:15:10: 15:11 (#0), res: Err, segments: [PathSegment { ident: m#0, hir_id: Some(HirId { owner: DefId(0:3 ~ closures[6543]::r), local_id: 11 }), res: Some(Err), args: None, infer_args: true }] })), span: closures.rs:15:10: 15:11 (#0) }), hir_id: HirId { owner: DefId(0:3 ~ closures[6543]::r), local_id: 13 }, span: closures.rs:15:8: 15:11 (#0), source: AssignDesugar(closures.rs:15:9: 15:10 (#0)) }), span: closures.rs:15:8: 15:11 (#0) }], expr: None, hir_id: HirId { owner: DefId(0:3 ~ closures[6543]::r), local_id: 15 }, rules: DefaultBlock, span: closures.rs:15:8: 15:11 (#0), targeted_by_break: false }, None)
+    */
+    if unsafe { VERBOSE } {
+        println!("kind: {:?}", expression.kind);
+    }
     visitor.visit_id(expression.hir_id);
     match expression.kind {
         ExprKind::Box(ref subexpression) => visitor.visit_expr(subexpression),
@@ -1133,12 +1162,22 @@ pub fn walk_expr<'v, V: Visitor<'v>>(visitor: &mut V, expression: &'v Expr<'v>) 
         }
         ExprKind::Struct(ref qpath, fields, ref optional_base) => {
             visitor.visit_qpath(qpath, expression.hir_id, expression.span);
+            if unsafe { VERBOSE } {
+                println!("visiting struct fields...");
+            }
             for field in fields {
                 visitor.visit_id(field.hir_id);
                 visitor.visit_ident(field.ident);
                 visitor.visit_expr(&field.expr)
             }
+            if unsafe { VERBOSE } {
+                println!("visited struct fields!");
+            }
+            // FIXME: ~TERRA: In the following the assignment should happen | 23.02.22 - 13:30
             walk_list!(visitor, visit_expr, optional_base);
+            if unsafe { VERBOSE } {
+                println!("visited struct exprs!");
+            }
         }
         ExprKind::Tup(subexpressions) => {
             walk_list!(visitor, visit_expr, subexpressions);
@@ -1189,7 +1228,10 @@ pub fn walk_expr<'v, V: Visitor<'v>>(visitor: &mut V, expression: &'v Expr<'v>) 
             ),
         ExprKind::Block(ref block, ref opt_label) => {
             walk_list!(visitor, visit_label, opt_label);
-            visitor.visit_block(block);
+            if unsafe { VERBOSE } {
+                println!("after visit label!");
+            }
+            visitor.visit_block(block); // FIXME: The assignment should be in this call!
         }
         ExprKind::Assign(ref lhs, ref rhs, _) => {
             visitor.visit_expr(rhs);

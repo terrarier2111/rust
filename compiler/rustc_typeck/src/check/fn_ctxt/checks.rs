@@ -989,6 +989,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             self.write_ty(hir_id, ty);
             self.write_ty(pat.hir_id, ty);
             let local_ty = LocalTy { decl_ty, revealed_ty: ty };
+            if self.tcx.sess.verbose() {
+                println!("local type: {:?}", local_ty);
+            }
             self.locals.borrow_mut().insert(hir_id, local_ty);
             self.locals.borrow_mut().insert(pat.hir_id, local_ty);
         }

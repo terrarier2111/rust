@@ -39,8 +39,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         body: &'tcx hir::Body<'tcx>,
     ) -> &'tcx ty::TypeckResults<'tcx> {
+        if self.tcx.sess.verbose() {
+            println!("0");
+        }
         let item_id = self.tcx.hir().body_owner(body.id());
         let item_def_id = self.tcx.hir().local_def_id(item_id);
+
+        if self.tcx.sess.verbose() {
+            println!("1");
+            println!("item_id: {}", item_id);
+        }
 
         // This attribute causes us to dump some writeback information
         // in the form of errors, which is used for unit tests.
@@ -51,6 +59,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         for param in body.params {
             wbcx.visit_node_id(param.pat.span, param.hir_id);
         }
+        if self.tcx.sess.verbose() {
+            println!("2");
+        }
         // Type only exists for constants and statics, not functions.
         match self.tcx.hir().body_owner_kind(item_id) {
             hir::BodyOwnerKind::Const | hir::BodyOwnerKind::Static(_) => {
@@ -58,7 +69,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
             hir::BodyOwnerKind::Closure | hir::BodyOwnerKind::Fn => (),
         }
-        wbcx.visit_body(body);
+        if self.tcx.sess.verbose() {
+            println!("3");
+        }
+        wbcx.visit_body(body); // FIXME: ~TERRA this causes the ICE!
+        if self.tcx.sess.verbose() {
+            println!("3.1");
+        }
         wbcx.visit_min_capture_map();
         wbcx.eval_closure_size();
         wbcx.visit_fake_reads_map();
@@ -70,6 +87,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         wbcx.visit_user_provided_tys();
         wbcx.visit_user_provided_sigs();
         wbcx.visit_generator_interior_types();
+        if self.tcx.sess.verbose() {
+            println!("4");
+        }
 
         let used_trait_imports =
             mem::take(&mut self.typeck_results.borrow_mut().used_trait_imports);
@@ -254,6 +274,9 @@ impl<'cx, 'tcx> WritebackCx<'cx, 'tcx> {
 
 impl<'cx, 'tcx> Visitor<'tcx> for WritebackCx<'cx, 'tcx> {
     fn visit_expr(&mut self, e: &'tcx hir::Expr<'tcx>) {
+        if self.fcx.tcx.sess.verbose() {
+            println!("visiting expr: {:?}", e);
+        }
         self.fix_scalar_builtin_expr(e);
         self.fix_index_builtin_expr(e);
 
@@ -318,6 +341,7 @@ impl<'cx, 'tcx> Visitor<'tcx> for WritebackCx<'cx, 'tcx> {
     }
 
     fn visit_local(&mut self, l: &'tcx hir::Local<'tcx>) {
+        // println!("visiting: {:?}", l);
         intravisit::walk_local(self, l);
         let var_ty = self.fcx.local_ty(l.span, l.hir_id).decl_ty;
         let var_ty = self.resolve(var_ty, &l.span);

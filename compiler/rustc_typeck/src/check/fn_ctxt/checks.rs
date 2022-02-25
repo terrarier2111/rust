@@ -106,9 +106,9 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // Expression of the call site
         call_expr: &'tcx hir::Expr<'tcx>,
         // Types (as defined in the *signature* of the target function)
-        formal_input_tys: &[Ty<'tcx>],
+        pr_formal_input_tys: &[Ty<'tcx>],
         // More specific expected types, after unifying with caller output types
-        expected_input_tys: Vec<Ty<'tcx>>,
+        pr_expected_input_tys: Vec<Ty<'tcx>>,
         // The expressions for each provided argument
         provided_args: &'tcx [hir::Expr<'tcx>],
         // Whether the function is variadic, for example when imported from C
@@ -118,6 +118,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // The DefId for the function being called, for better error messages
         fn_def_id: Option<DefId>,
     ) {
+        let pr_expected_input_tys_cpy = pr_expected_input_tys.clone();
         let tcx = self.tcx;
         // Grab the argument types, supplying fresh type variables
         // if the wrong number of arguments were supplied
@@ -126,26 +127,26 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
 
         // All the input types from the fn signature must outlive the call
         // so as to validate implied bounds.
-        for (&fn_input_ty, arg_expr) in iter::zip(formal_input_tys, provided_args) {
+        for (&fn_input_ty, arg_expr) in iter::zip(pr_formal_input_tys, provided_args) {
             self.register_wf_obligation(fn_input_ty.into(), arg_expr.span, traits::MiscObligation);
         }
 
-        let expected_arg_count = formal_input_tys.len();
+        let expected_arg_count = pr_formal_input_tys.len();
 
         // expected_count, arg_count, error_code, sugg_unit, sugg_tuple_wrap_args
-        let mut error: Option<(usize, usize, &str, bool, Option<FnArgsAsTuple<'_>>)> = None;
+        let mut error: Option<(usize, usize, &str, bool)> = None;
 
         // If the arguments should be wrapped in a tuple (ex: closures), unwrap them here
         let (formal_input_tys, expected_input_tys) = if tuple_arguments == TupleArguments {
-            let tuple_type = self.structurally_resolved_type(call_span, formal_input_tys[0]);
+            let tuple_type = self.structurally_resolved_type(call_span, pr_formal_input_tys[0]);
             match tuple_type.kind() {
                 // We expected a tuple and got a tuple
                 ty::Tuple(arg_types) => {
                     // Argument length differs
                     if arg_types.len() != provided_args.len() {
-                        error = Some((arg_types.len(), provided_args.len(), "E0057", false, None));
+                        error = Some((arg_types.len(), provided_args.len(), "E0057", false));
                     }
-                    let expected_input_tys = match expected_input_tys.get(0) {
+                    let expected_input_tys = match pr_expected_input_tys.get(0) {
                         Some(&ty) => match ty.kind() {
                             ty::Tuple(tys) => tys.iter().collect(),
                             _ => vec![],
@@ -169,41 +170,29 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 }
             }
         } else if expected_arg_count == supplied_arg_count {
-            (formal_input_tys.to_vec(), expected_input_tys)
+            (pr_formal_input_tys.to_vec(), pr_expected_input_tys)
         } else if c_variadic {
             if supplied_arg_count >= expected_arg_count {
-                (formal_input_tys.to_vec(), expected_input_tys)
+                (pr_formal_input_tys.to_vec(), pr_expected_input_tys)
             } else {
-                error = Some((expected_arg_count, supplied_arg_count, "E0060", false, None));
+                error = Some((expected_arg_count, supplied_arg_count, "E0060", false));
                 (self.err_args(supplied_arg_count), vec![])
             }
         } else {
             // is the missing argument of type `()`?
-            let sugg_unit = if expected_input_tys.len() == 1 && supplied_arg_count == 0 {
-                self.resolve_vars_if_possible(expected_input_tys[0]).is_unit()
-            } else if formal_input_tys.len() == 1 && supplied_arg_count == 0 {
-                self.resolve_vars_if_possible(formal_input_tys[0]).is_unit()
+            let sugg_unit = if pr_expected_input_tys.len() == 1 && supplied_arg_count == 0 {
+                self.resolve_vars_if_possible(pr_expected_input_tys[0]).is_unit()
+            } else if pr_formal_input_tys.len() == 1 && supplied_arg_count == 0 {
+                self.resolve_vars_if_possible(pr_formal_input_tys[0]).is_unit()
             } else {
                 false
             };
-
-            // are we passing elements of a tuple without the tuple parentheses?
-            let expected_input_tys = if expected_input_tys.is_empty() {
-                // In most cases we can use expected_input_tys, but some callers won't have the type
-                // information, in which case we fall back to the types from the input expressions.
-                formal_input_tys
-            } else {
-                &*expected_input_tys
-            };
-
-            let sugg_tuple_wrap_args = self.suggested_tuple_wrap(expected_input_tys, provided_args);
 
             error = Some((
                 expected_arg_count,
                 supplied_arg_count,
                 "E0061",
                 sugg_unit,
-                sugg_tuple_wrap_args,
             ));
             (self.err_args(supplied_arg_count), vec![])
         };
@@ -327,8 +316,23 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
         }
 
+        // are we passing elements of a tuple without the tuple parentheses?
+        let tuple_expected_input_tys = if pr_expected_input_tys_cpy.is_empty() {
+            // In most cases we can use expected_input_tys, but some callers won't have the type
+            // information, in which case we fall back to the types from the input expressions.
+            pr_formal_input_tys
+        } else {
+            &*pr_expected_input_tys_cpy
+        };
+
+        let suggest_tuple_wrap = if tuple_arguments != TupleArguments && expected_arg_count != supplied_arg_count && !c_variadic {
+            self.suggested_tuple_wrap(tuple_expected_input_tys, provided_args)
+        } else {
+            None
+        };
+
         // If there was an error in parameter count, emit that here
-        if let Some((expected_count, arg_count, err_code, sugg_unit, sugg_tuple_wrap_args)) = error
+        if let (Some((expected_count, arg_count, err_code, sugg_unit)), sugg_tuple_wrap_args) = (error, suggest_tuple_wrap)
         {
             let (span, start_span, args, ctor_of) = match &call_expr.kind {
                 hir::ExprKind::Call(
@@ -495,15 +499,31 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         expected_input_tys: &[Ty<'tcx>],
         provided_args: &'tcx [hir::Expr<'tcx>],
     ) -> Option<FnArgsAsTuple<'_>> {
+        println!("checking tuple wrap!");
         let [expected_arg_type] = expected_input_tys[..] else { return None };
 
         let &ty::Tuple(expected_types) = self.resolve_vars_if_possible(expected_arg_type).kind()
             else { return None };
+        println!("resolved vars!");
 
-        let supplied_types: Vec<_> = provided_args.iter().map(|arg| self.check_expr(arg)).collect();
+        let supplied_types: Vec<_> = provided_args.iter().map(|arg| /*self.resolve_vars_if_possible(arg)*/self.typeck_results.borrow().node_type(arg.hir_id)).collect(); // FIXME: Here is the issue!
+
+        println!("checked exprs!");
 
         let all_match = iter::zip(expected_types, supplied_types)
             .all(|(expected, supplied)| self.can_eq(self.param_env, expected, supplied).is_ok());
+        println!("can eq!");
+
+        /*
+         let supplied_types: Vec<_> = provided_args.iter().enumerate().map(|arg| !self.check_expr_with_expectation(arg.1, Expectation::ExpectHasType(expected_types[arg.0])).references_error()).collect(); // FIXME: This is the issue!
+
+        println!("checked exprs!");
+
+        /*
+        let all_match = iter::zip(expected_types, supplied_types)
+            .all(|(expected, supplied)| self.can_eq(self.param_env, expected, supplied).is_ok());*/
+        let all_match = supplied_types.into_iter().all(|x| x);
+        */
 
         if all_match {
             match provided_args {
